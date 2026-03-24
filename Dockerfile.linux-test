@@ -1,0 +1,61 @@
+# ROVIA Linux Test Container
+# Tests the Linux installation and rovia_v2.py inside Ubuntu 22.04
+#
+# BUILD:
+#   docker build -f Dockerfile.linux-test -t rovia-linux-test .
+#
+# RUN (mount your model file and video folder from Windows):
+#   docker run -it --rm \
+#     -v "C:\Users\Deb Smith\Documents\ROVIA\ROVIA\grama.hdf5:/rovia/grama.hdf5" \
+#     -v "C:\path\to\your\videos:/rovia/video" \
+#     -v "C:\Users\Deb Smith\Desktop\rovia-output:/rovia/Rovia_Clips" \
+#     rovia-linux-test
+#
+# INSIDE THE CONTAINER:
+#   conda activate rovia
+#   python rovia_v2.py -f ./video/ -m ./grama.hdf5 -v 1
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System dependencies needed by OpenCV and moviepy/ffmpeg
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    git \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Miniconda
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
+        -O /tmp/miniconda.sh \
+    && bash /tmp/miniconda.sh -b -p /opt/conda \
+    && rm /tmp/miniconda.sh \
+    && /opt/conda/bin/conda clean -afy
+
+ENV PATH="/opt/conda/bin:$PATH"
+
+# Initialize conda for bash
+RUN conda init bash
+
+# Copy repo files (excludes grama.hdf5 and Rovia_Clips/ per .gitignore)
+WORKDIR /rovia
+COPY . .
+
+# Run the Linux installer non-interactively
+RUN bash linux_install.sh
+
+# Set conda activate in default shell
+SHELL ["/bin/bash", "--login", "-c"]
+
+# Default: drop into an interactive bash shell with rovia env active
+ENV CONDA_DEFAULT_ENV=rovia
+RUN echo "conda activate rovia" >> /root/.bashrc
+
+CMD ["/bin/bash", "--login"]
