@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+# ROVIA v2.0 - Optimized version with performance improvements
 
 import cv2
 import numpy as np
@@ -31,11 +32,27 @@ RESIZE_WIDTH = 160
 RESIZE_HEIGHT = 90
 NUM_PROCESSES = os.cpu_count()
 PROCESS_CHUNK_DURATION = WINDOW_SIZE * 10
+# Optimized batch size for better GPU utilization (3x larger than v1)
+PREDICTION_BATCH_SIZE = 450  # Increased from 150 (5*30)
 
 class rovia():
 
     def __init__(self):
-        pass
+        self.check_gpu_availability()
+
+    def check_gpu_availability(self):
+        """Check if GPU is available and configure TensorFlow accordingly"""
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            try:
+                # Enable memory growth to avoid allocating all GPU memory at once
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                print(f'GPU acceleration enabled: {len(gpus)} GPU(s) detected')
+            except RuntimeError as e:
+                print(f'GPU configuration error: {e}')
+        else:
+            print('No GPU detected, using CPU')
 
     def recall_m(self, y_true, y_pred):
         true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
@@ -63,74 +80,97 @@ class rovia():
         }
         model = load_model(path, custom_objects=dependencies)
         print('Model load complete ...')
-        #model.summary()
         return model
 
     def generateHighlights(self, X, model, fps):
+        """Optimized: Larger batch size for better GPU utilization"""
         y = []
-        #Cut up video into bite size chunks
-        for i in range(0, len(X), 5*30):
-            try :
-                X_chunk = X[i:i+5*30]
-            except:
-                X_chunk = X[i:len(X)]
+        total_samples = len(X)
 
-            prediction = model.predict(X_chunk, verbose=1)
+        # Process in larger batches for better GPU utilization
+        for i in range(0, total_samples, PREDICTION_BATCH_SIZE):
+            end_idx = min(i + PREDICTION_BATCH_SIZE, total_samples)
+            X_chunk = X[i:end_idx]
+
+            # Predict with batching
+            prediction = model.predict(X_chunk, verbose=0, batch_size=32)
             prediction = np.argmax(prediction, axis=1)
             y.extend(prediction)
+
         return np.array(y)
 
     def postProcessHighlights(self, y, kernelSize=5):
+        """Optimized: Pre-allocate arrays instead of extending"""
         kernel = np.ones(kernelSize) / kernelSize
         data_convolved = np.convolve(y, kernel, mode='same')
 
-        y = 1*[elem>0.5 for elem in data_convolved]
-        y_extended = np.array(y)
+        # Vectorized operation instead of list comprehension
+        y_extended = (data_convolved > 0.5).astype(int)
 
+        # Edge smoothing (kept as is since it's sequential logic)
         for i in range(2, len(y)-2):
-            if y[i] == 0 and y[i+1] == 1:
+            if y_extended[i] == 0 and y_extended[i+1] == 1:
                 y_extended[i-2:i+1] = 1
-            if y[i-1] == 1 and y[i] == 0:
+            if y_extended[i-1] == 1 and y_extended[i] == 0:
                 y_extended[i:i+3] = 1
         return y_extended
-    
+
     def readVideoChunk(self, path, startFrame, chunkDuration):
+        """Optimized: Pre-allocate arrays, improved memory management"""
         vid = cv2.VideoCapture(path)
         vid.set(cv2.CAP_PROP_POS_FRAMES, startFrame)
 
         ret, prev_frame = vid.read()
+        if not ret:
+            vid.release()
+            return []
+
         frame_resized = cv2.resize(prev_frame, (RESIZE_WIDTH, RESIZE_HEIGHT), interpolation=cv2.INTER_AREA)
         prev_gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
 
-        Xmatrix = []
-        for frame in range(chunkDuration):
+        # Pre-allocate array for better memory performance
+        Xmatrix = np.zeros((chunkDuration, RESIZE_HEIGHT, RESIZE_WIDTH, 3), dtype='uint8')
+        frame_count = 0
+
+        for frame_idx in range(chunkDuration):
             ret, frame = vid.read()
-            if ret == True:
-                frame_resized = cv2.resize(frame, (RESIZE_WIDTH, RESIZE_HEIGHT), interpolation=cv2.INTER_AREA)
-                gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
-                flow = cv2.calcOpticalFlowFarneback(prev_gray, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-                # Computes the magnitude and angle of the 2D vectors
-                magnitude, angle = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-                magnitude = magnitude * 255
-                magnitude = magnitude.astype('uint8')
-                angle = angle / (2 * np.pi) * 255
-                angle = angle.astype('uint8')
-                frame = np.stack((gray, magnitude, angle), axis=2)
-                Xmatrix.append(frame)
-                prev_gray = gray
-            else:
+            if not ret:
                 break
-            
+
+            frame_resized = cv2.resize(frame, (RESIZE_WIDTH, RESIZE_HEIGHT), interpolation=cv2.INTER_AREA)
+            gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
+
+            # Optical flow calculation (kept as is for accuracy)
+            flow = cv2.calcOpticalFlowFarneback(prev_gray, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+
+            # Computes the magnitude and angle of the 2D vectors
+            magnitude, angle = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+            magnitude = (magnitude * 255).astype('uint8')
+            angle = (angle / (2 * np.pi) * 255).astype('uint8')
+
+            # Stack channels directly into pre-allocated array
+            Xmatrix[frame_count] = np.stack((gray, magnitude, angle), axis=2)
+            prev_gray = gray
+            frame_count += 1
+
         vid.release()
         cv2.destroyAllWindows()
 
-        windowed = [Xmatrix[i:i + WINDOW_SIZE] for i in range(0, chunkDuration, WINDOW_SIZE)]
-        npad = WINDOW_SIZE - np.shape(windowed[-1])[0]
-        pad_matrix = np.zeros([npad, RESIZE_HEIGHT, RESIZE_WIDTH, 3], dtype='uint8')
-        windowed[-1] = np.append(windowed[-1], pad_matrix, axis=0)
-            
+        # Trim to actual frame count
+        Xmatrix = Xmatrix[:frame_count]
+
+        # Window the data
+        num_windows = (frame_count + WINDOW_SIZE - 1) // WINDOW_SIZE
+        windowed = np.zeros((num_windows, WINDOW_SIZE, RESIZE_HEIGHT, RESIZE_WIDTH, 3), dtype='uint8')
+
+        for i in range(num_windows):
+            start_idx = i * WINDOW_SIZE
+            end_idx = min(start_idx + WINDOW_SIZE, frame_count)
+            window_length = end_idx - start_idx
+            windowed[i, :window_length] = Xmatrix[start_idx:end_idx]
+
         return windowed
-    
+
     def getVideoMetadata(self, path):
         vid = cv2.VideoCapture(path)
         fps = vid.get(cv2.CAP_PROP_FPS)
@@ -140,19 +180,21 @@ class rovia():
 
         return fps, frameCount
 
-    def analyzeVideo(self, path, model, verbose):
+    def analyzeVideo(self, path, model, verbose, process_pool):
+        """Optimized: Uses passed process pool, better memory management"""
         fps, frameCount = self.getVideoMetadata(path)
 
         # Number of video chunks to process
         numChunks = frameCount // PROCESS_CHUNK_DURATION
 
         results = []
+
         # for each group of chunks
         for chunkGroupStart in range(0, numChunks, NUM_PROCESSES):
             remainingChunks = numChunks - chunkGroupStart
             numChunksInGroup = min(remainingChunks, NUM_PROCESSES)
             chunkGroupEnd = chunkGroupStart + numChunksInGroup
-            chunkGroupStartFrame = chunkGroupStart*PROCESS_CHUNK_DURATION      
+            chunkGroupStartFrame = chunkGroupStart*PROCESS_CHUNK_DURATION
 
             if(verbose):
                 print('Analyizing chunks: ' + str(chunkGroupStart) + ' to ' + str(chunkGroupEnd))
@@ -160,16 +202,13 @@ class rovia():
 
             # Generate the list of video chunk start frames within the chunk group
             pool_args = [(path, chunkGroupStartFrame + (j * PROCESS_CHUNK_DURATION), PROCESS_CHUNK_DURATION) for j in range(numChunksInGroup)]
-            
-            # split up the work across NUM_PROCESSES processes
-            groupResults = []
-            with Pool(processes=NUM_PROCESSES) as pool:
-                groupResults = pool.starmap(self.readVideoChunk, pool_args)
+
+            # Use passed process pool
+            groupResults = process_pool.starmap(self.readVideoChunk, pool_args)
             del pool_args
 
-            # convert the list of results into a numpy array, remove the num_processes dimension
-            groupResults = np.array(groupResults)
-            groupResults = groupResults.reshape((-1, 60, 90, 160, 3))
+            # convert the list of results into a numpy array
+            groupResults = np.vstack(groupResults)
 
             # generate highlights for the chunk group
             if(verbose):
@@ -184,24 +223,16 @@ class rovia():
             del chunk_highlights
 
             results.extend(refined_highlights)
-
             del refined_highlights
 
             if(verbose):
                 print('Completed chunks: ' + str(chunkGroupStart) + ' to ' + str(chunkGroupEnd))
                 print('----------------------------------------')
-        
+
         return results
 
     def interpretInputMetadata(self, videoFileName):
         # Verifies the filename contains a timestamp (yyyymmddThhmmssZ ex.20181214T1401Z)
-        # \d{4} - Year - 4 digits (0-9)
-        # (0[1-9]|1[0-2]) - Month - 2 digits (0 + 1-9) or (1 + 0-2)
-        # (0[1-9]|[1-2]\d|3[0-1]) - Day - 2 digits (0 + 1-9) or (1-2 + 0-9) or (3 + 0-1)
-        # T
-        # ([0-1]\d|2[0-3]) - Hour - 2 digits (0-1 + 0-9) or (2 + 0-3)
-        # [0-5]\d[0-5]\d - Minute - 2 digits (0-5 + 0-9) (0-5 + 0-9)
-        # Z
         pattern = r'\d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|3[0-1])T([0-1]\d|2[0-3])[0-5]\d[0-5]\dZ'
 
         timestamp = search(pattern, videoFileName)
@@ -212,14 +243,14 @@ class rovia():
             raise Exception('Invalid filename. Timestamp not found.')
 
         preformattedFilename = videoFileName.replace(timestamp, '$[timestamp]')
-        
+
         # returns a datetime object
         timestampDT = datetime.datetime.strptime(timestamp, '%Y%m%dT%H%M%SZ')
 
         return timestampDT, preformattedFilename
-    
-    # Attempts to fully close a clip, including its reader and audio reader. This fixes FFMPEG errors on windows machines.
+
     def closeClip(self, clip):
+        """Attempts to fully close a clip, including its reader and audio reader."""
         try:
             clip.reader.close()
             del clip.reader
@@ -227,13 +258,13 @@ class rovia():
             if clip.audio is not None:
                 clip.audio.reader.close_proc()
                 del clip.audio
-            
+
             del clip
         except Exception:
             pass
 
-    def generateClips(self, annotations, path, fps):
-        # Use os.path.basename to handle both Windows and Unix paths
+    def generateClips(self, annotations, path, fps, output_format='mp4'):
+        """Optimized: Faster clip generation with format option (mp4 or native)"""
         filename = os.path.splitext(os.path.basename(path))[0]
         fullvideo = VideoFileClip(path)
 
@@ -259,68 +290,117 @@ class rovia():
 
             alterredFilename = preformattedFilename.replace('$[timestamp]', f'{clipDate}T{clipTime}Z')
 
-            clip.write_videofile(f"{clipsdir}/{alterredFilename}_HL.mp4", temp_audiofile="./temp-audio.m4a", remove_temp=True, audio_codec="aac")
+            if output_format == 'native':
+                # Keep original ProRes MOV format and quality
+                output_path = f"{clipsdir}/{alterredFilename}_HL.mov"
+                clip.write_videofile(
+                    output_path,
+                    codec="prores",
+                    audio_codec="pcm_s16le",  # Uncompressed audio
+                    preset="medium",
+                    threads=4,
+                    verbose=False,
+                    logger=None,
+                    ffmpeg_params=["-profile:v", "3"]  # ProRes 422 HQ profile
+                )
+            else:
+                # H.264 MP4 (smaller, faster encoding)
+                output_path = f"{clipsdir}/{alterredFilename}_HL.mp4"
+                clip.write_videofile(
+                    output_path,
+                    temp_audiofile="./temp-audio.m4a",
+                    remove_temp=True,
+                    audio_codec="aac",
+                    codec="libx264",
+                    preset="fast",
+                    threads=4,
+                    verbose=False,
+                    logger=None
+                )
 
         self.closeClip(fullvideo)
 
-    def startRovia(self, folder, model, verbose):
+    def startRovia(self, folder, model_path, verbose, output_format='mp4'):
+        """Optimized: Load model once and reuse across all videos with persistent pool"""
         dependencies = {
             'f1_m': self.f1_m,
             'precision_m': self.precision_m,
             'recall_m': self.recall_m
         }
-        model = load_model(model, custom_objects=dependencies)
+
+        print('Loading model...')
+        model = load_model(model_path, custom_objects=dependencies)
+        print('Model loaded successfully')
+
         # Go through directory
         FOLDER = folder
+        video_files = []
+
         for root, dirs, files in os.walk(FOLDER):
             for file in files:
                 if file.endswith('.mp4') or file.endswith('.mov'):
-                    # Read video section
-                    if verbose == 1:
-                        print('\nReading video: ' + file)
+                    video_files.append((root, file))
 
-                    videofilepath = FOLDER + file
+        total_videos = len(video_files)
+        print(f'Found {total_videos} video(s) to process')
+        print(f'Output format: {output_format.upper()} ({"ProRes MOV" if output_format == "native" else "H.264 MP4"})')
 
-                    start = time.time()
-                    prediction = self.analyzeVideo(videofilepath, model, verbose)
+        # Create persistent process pool for all videos
+        with Pool(processes=NUM_PROCESSES) as process_pool:
+            for idx, (root, file) in enumerate(video_files, 1):
+                if verbose == 1:
+                    print(f'\n[{idx}/{total_videos}] Reading video: {file}')
 
-                    if verbose == 1:
-                        print('Generating clips ...')
+                videofilepath = os.path.join(FOLDER, file)
 
-                    self.generateClips(annotations=prediction, path=videofilepath, fps=30)
-                    end = time.time()
+                start = time.time()
+                prediction = self.analyzeVideo(videofilepath, model, verbose, process_pool)
 
-                    print('Time taken: ' + str(end-start) + ' seconds')
+                if verbose == 1:
+                    print('Generating clips ...')
 
-                    if verbose == 1:
-                        print('Done')
-                    
+                self.generateClips(annotations=prediction, path=videofilepath, fps=30, output_format=output_format)
+                end = time.time()
+
+                print(f'Time taken: {end-start:.2f} seconds')
+
+                if verbose == 1:
+                    print('Done')
+
         print('~~Highlight generation complete~~')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='~~ Rovia: The coolest underwater highlight generator ~~\n Incubated @ Ocean Exploration Cooperative Institute', formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description='~~ ROVIA v2.0: Optimized underwater highlight generator ~~\n Incubated @ Ocean Exploration Cooperative Institute',
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     parser.add_argument('-m', '--model', help='Optional: Path to the model file')
-    parser.add_argument('-f', '--folder', help='Required:Folder where videos are stored')
-    parser.add_argument('-v', '--verbose', help='Optional:Less or more chatter? 0/1')
+    parser.add_argument('-f', '--folder', help='Required: Folder where videos are stored')
+    parser.add_argument('-v', '--verbose', help='Optional: Less or more chatter? 0/1')
+    parser.add_argument('-o', '--output',
+                        choices=['mp4', 'native'],
+                        default='mp4',
+                        help='Optional: Output format - "mp4" (H.264, smaller files, faster) or "native" (ProRes MOV, original quality)')
     args = parser.parse_args()
+
     if args.folder == None:
-        print('File path missing, try python rovia.py -h for help')
+        print('File path missing, try python rovia_v2.py -h for help')
         exit()
+
     if args.model == None:
         model = './grama.hdf5'
     else:
         model = args.model
+
     if args.verbose == None:
         verbose = 1
     else:
-        verbose = args.verbose
+        verbose = int(args.verbose)
+
+    print('='*60)
+    print('ROVIA v2.0 - Performance Optimized Edition')
+    print('='*60)
+
     r = rovia()
-    r.startRovia(folder=args.folder, model=model, verbose=1)
-
-
-
-
-
-
-
+    r.startRovia(folder=args.folder, model_path=model, verbose=verbose, output_format=args.output)
