@@ -32,11 +32,11 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Miniconda
-RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
-        -O /tmp/miniconda.sh \
-    && bash /tmp/miniconda.sh -b -p /opt/conda \
-    && rm /tmp/miniconda.sh \
+# Install Miniforge (no Anaconda TOS required, uses conda-forge)
+RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+        -O /tmp/miniforge.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/conda \
+    && rm /tmp/miniforge.sh \
     && /opt/conda/bin/conda clean -afy
 
 ENV PATH="/opt/conda/bin:$PATH"
@@ -48,8 +48,8 @@ RUN conda init bash
 WORKDIR /rovia
 COPY . .
 
-# Run the Linux installer non-interactively
-RUN bash linux_install.sh
+# Strip Windows CRLF line endings before running (file may be edited on Windows)
+RUN sed -i 's/\r$//' linux_install.sh && bash linux_install.sh
 
 # Set conda activate in default shell
 SHELL ["/bin/bash", "--login", "-c"]

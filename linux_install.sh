@@ -20,12 +20,18 @@ done
 
 # Check for conda
 if ! command -v conda &> /dev/null; then
-    echo "ERROR: Conda/Miniconda not found!"
+    echo "ERROR: Conda not found!"
     echo ""
-    echo "Install Miniconda first:"
+    echo "Install Miniforge (recommended - no TOS required):"
+    echo "  wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+    echo "  bash Miniforge3-Linux-x86_64.sh"
+    echo "  source ~/.bashrc"
+    echo ""
+    echo "Or Miniconda (requires accepting Anaconda TOS):"
     echo "  wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
     echo "  bash Miniconda3-latest-Linux-x86_64.sh"
     echo "  source ~/.bashrc"
+    echo "  conda tos accept"
     echo ""
     echo "Then re-run this script."
     exit 1
@@ -42,35 +48,39 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate rovia
 
 echo ""
+echo "Step 3: Installing numpy 1.26.4 first (must precede TensorFlow install)..."
+pip install numpy==1.26.4
+
+echo ""
 if [ "$GPU_SUPPORT" -eq 1 ]; then
-    echo "Step 3: Installing TensorFlow 2.15.0 with GPU support..."
+    echo "Step 4: Installing TensorFlow 2.15.0 with GPU support..."
     echo "NOTE: Requires NVIDIA drivers, CUDA 11.8, and cuDNN 8.6 already installed."
     echo "See linux_install.md for CUDA setup instructions."
     pip install tensorflow[and-cuda]==2.15.0
 else
-    echo "Step 3: Installing TensorFlow 2.15.0 (CPU-only)..."
+    echo "Step 4: Installing TensorFlow 2.15.0 (CPU-only)..."
     echo "Tip: Re-run with --gpu flag for GPU acceleration if you have an NVIDIA GPU."
     pip install tensorflow==2.15.0
 fi
 
 echo ""
-echo "Step 4: Installing moviepy 1.0.3..."
+echo "Step 5: Installing moviepy 1.0.3..."
 pip install moviepy==1.0.3
 
 echo ""
-echo "Step 5: Installing h5py 3.10.0 (required for large model files)..."
+echo "Step 6: Installing h5py 3.10.0 (required for large model files)..."
 pip install h5py==3.10.0
-
-echo ""
-echo "Step 6: Installing numpy 1.26.4 (TensorFlow 2.15 compatible)..."
-pip install numpy==1.26.4
 
 echo ""
 echo "Step 7: Installing OpenCV..."
 pip install opencv-python
 
 echo ""
-echo "Step 8: Verifying installation..."
+echo "Step 8: Re-pinning numpy 1.26.4 (TF may have upgraded it)..."
+pip install numpy==1.26.4 --force-reinstall
+
+echo ""
+echo "Step 9: Verifying installation..."
 python -c "
 import tensorflow as tf
 import cv2
