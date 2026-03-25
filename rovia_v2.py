@@ -298,10 +298,11 @@ class rovia():
 
             clip_records.append({
                 'source': os.path.basename(path),
+                'source_path': os.path.abspath(path),
                 'start_sec': clipStartTime,
                 'end_sec': clipEndTime,
                 'duration_sec': duration,
-                'output': output_path,
+                'output': os.path.abspath(output_path),
             })
 
             if not dry_run:
@@ -394,11 +395,16 @@ class rovia():
                     print('Done')
 
         if dry_run:
-            report_path = os.path.join('./Rovia_Clips/', 'rovia_highlights_report.txt')
             os.makedirs('./Rovia_Clips/', exist_ok=True)
+            now = datetime.datetime.utcnow()
+            generated = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+            run_ts = now.strftime("%Y%m%dT%H%M%SZ")
+
+            # Human-readable report
+            report_path = os.path.join('./Rovia_Clips/', f'rovia_highlights_report_{run_ts}.txt')
             with open(report_path, 'w') as f:
                 f.write('ROVIA Highlight Report (Dry Run)\n')
-                f.write(f'Generated: {datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}\n')
+                f.write(f'Generated: {generated}\n')
                 f.write(f'Videos processed: {total_videos}\n')
                 f.write(f'Total highlights found: {len(all_clip_records)}\n')
                 f.write('=' * 60 + '\n\n')
@@ -409,7 +415,20 @@ class rovia():
                     f.write(f'Duration:  {r["duration_sec"]}s\n')
                     f.write(f'Would save: {r["output"]}\n')
                     f.write('-' * 40 + '\n')
-            print(f'\nDry run complete. Report written to: {report_path}')
+
+            # CSV manifest — one row per clip, used by rovia_cut_clips.sh / .bat
+            csv_path = os.path.join('./Rovia_Clips/', f'rovia_manifest_{run_ts}.csv')
+            with open(csv_path, 'w') as f:
+                f.write('source_path,start_sec,end_sec,duration_sec,output_path\n')
+                for r in all_clip_records:
+                    f.write(f'{r["source_path"]},{r["start_sec"]},{r["end_sec"]},{r["duration_sec"]},{r["output"]}\n')
+
+            print(f'\nDry run complete.')
+            print(f'  Report:   {report_path}')
+            print(f'  Manifest: {csv_path}')
+            print(f'\nTo cut clips, run:')
+            print(f'  bash rovia_cut_clips.sh {csv_path}          (Linux/Mac)')
+            print(f'  rovia_cut_clips.bat {csv_path}              (Windows)')
         else:
             print('~~Highlight generation complete~~')
 

@@ -1,6 +1,17 @@
+# Python packages (install via pip inside conda environment)
 opencv-python
 numpy==1.26.4
 keras==2.15.0
 tensorflow==2.15.0
 moviepy==1.0.3
+h5py==3.10.0
 argparse
+
+# System dependency — NOT a pip package
+# Required to run the generated rovia_cut_clips.sh / rovia_cut_clips.bat scripts
+# ROVIA itself uses moviepy's bundled FFmpeg — no system install needed for that
+#
+# Windows:  winget install ffmpeg
+#           OR: https://ffmpeg.org/download.html
+# Linux:    sudo apt-get install ffmpeg
+# Mac:      brew install ffmpeg

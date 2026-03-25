@@ -147,6 +147,24 @@ Output clips are saved to `./Rovia_Clips/` with `_HL` appended to the filename.
 
 ---
 
+## FFmpeg
+
+**Running ROVIA** does not require a system FFmpeg install — moviepy bundles its own FFmpeg binary automatically.
+
+**Running the generated cut scripts** (`rovia_cut_clips.sh`) does require system FFmpeg:
+
+```bash
+# Ubuntu / Debian
+sudo apt-get install ffmpeg
+
+# RHEL / Rocky / Fedora
+sudo dnf install ffmpeg
+```
+
+The automated installer (`linux_install.sh`) handles this. If you installed manually, run the command above before using `rovia_cut_clips.sh`.
+
+---
+
 ## Testing with Docker Desktop (Windows Host)
 
 If you are on Windows and want to test the Linux version before deploying, use Docker Desktop:
