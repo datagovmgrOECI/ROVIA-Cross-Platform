@@ -396,10 +396,12 @@ class rovia():
 
         if dry_run:
             os.makedirs('./Rovia_Clips/', exist_ok=True)
-            generated = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+            now = datetime.datetime.utcnow()
+            generated = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+            run_ts = now.strftime("%Y%m%dT%H%M%SZ")
 
             # Human-readable report
-            report_path = os.path.join('./Rovia_Clips/', 'rovia_highlights_report.txt')
+            report_path = os.path.join('./Rovia_Clips/', f'rovia_highlights_report_{run_ts}.txt')
             with open(report_path, 'w') as f:
                 f.write('ROVIA Highlight Report (Dry Run)\n')
                 f.write(f'Generated: {generated}\n')
@@ -414,31 +416,19 @@ class rovia():
                     f.write(f'Would save: {r["output"]}\n')
                     f.write('-' * 40 + '\n')
 
-            # FFmpeg shell script (Linux / Mac)
-            sh_path = os.path.join('./Rovia_Clips/', 'rovia_cut_clips.sh')
-            with open(sh_path, 'w') as f:
-                f.write('#!/bin/bash\n')
-                f.write(f'# ROVIA FFmpeg clip cutter — generated {generated}\n')
-                f.write('# Run this script to cut highlight clips without re-running the model.\n')
-                f.write('# Video stream is copied (no re-encode); audio is re-encoded to AAC\n')
-                f.write('# for MP4 container compatibility (handles pcm_s16be and other raw codecs).\n\n')
+            # CSV manifest — one row per clip, used by rovia_cut_clips.sh / .bat
+            csv_path = os.path.join('./Rovia_Clips/', f'rovia_manifest_{run_ts}.csv')
+            with open(csv_path, 'w') as f:
+                f.write('source_path,start_sec,end_sec,duration_sec,output_path\n')
                 for r in all_clip_records:
-                    f.write(f'ffmpeg -i "{r["source_path"]}" -ss {r["start_sec"]} -to {r["end_sec"]} -c:v copy -c:a aac "{r["output"]}"\n')
-
-            # FFmpeg batch script (Windows)
-            bat_path = os.path.join('./Rovia_Clips/', 'rovia_cut_clips.bat')
-            with open(bat_path, 'w') as f:
-                f.write('@echo off\n')
-                f.write(f'REM ROVIA FFmpeg clip cutter -- generated {generated}\n')
-                f.write('REM Run this script to cut highlight clips without re-running the model.\n')
-                f.write('REM Video stream is copied (no re-encode); audio re-encoded to AAC for MP4 compatibility.\n\n')
-                for r in all_clip_records:
-                    f.write(f'ffmpeg -i "{r["source_path"]}" -ss {r["start_sec"]} -to {r["end_sec"]} -c:v copy -c:a aac "{r["output"]}"\n')
+                    f.write(f'{r["source_path"]},{r["start_sec"]},{r["end_sec"]},{r["duration_sec"]},{r["output"]}\n')
 
             print(f'\nDry run complete.')
-            print(f'  Report:         {report_path}')
-            print(f'  FFmpeg script (Linux/Mac): {sh_path}')
-            print(f'  FFmpeg script (Windows):   {bat_path}')
+            print(f'  Report:   {report_path}')
+            print(f'  Manifest: {csv_path}')
+            print(f'\nTo cut clips, run:')
+            print(f'  bash rovia_cut_clips.sh {csv_path}          (Linux/Mac)')
+            print(f'  rovia_cut_clips.bat {csv_path}              (Windows)')
         else:
             print('~~Highlight generation complete~~')
 
