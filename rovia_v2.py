@@ -270,64 +270,71 @@ class rovia():
         except Exception:
             pass
 
-    def generateClips(self, annotations, path, fps, output_format='mp4'):
-        """Optimized: Faster clip generation with format option (mp4 or native)"""
+    def generateClips(self, annotations, path, fps, output_format='mp4', dry_run=False):
+        """Clip generation with optional dry-run mode (report only, no encoding)"""
         filename = os.path.splitext(os.path.basename(path))[0]
-        fullvideo = VideoFileClip(path)
 
-        #Does clips directory exist?
         clipsdir = "./Rovia_Clips/"
-        isExist = os.path.exists(clipsdir)
-        if not isExist:
+        if not os.path.exists(clipsdir):
             os.makedirs(clipsdir)
 
         videoDT, preformattedFilename = self.interpretInputMetadata(filename)
 
         annotations = ''.join([str(1*item) for item in annotations])
 
+        clip_records = []
         for match in finditer('1+', annotations):
-            clipStartTime = int(match.span()[0]*WINDOW_SIZE/fps) # in seconds
-            clipEndTime = int(match.span()[1]*WINDOW_SIZE/fps) # in seconds
-
-            clip = fullvideo.subclip(clipStartTime, clipEndTime)
+            clipStartTime = int(match.span()[0]*WINDOW_SIZE/fps)
+            clipEndTime = int(match.span()[1]*WINDOW_SIZE/fps)
+            duration = clipEndTime - clipStartTime
 
             clipStartDT = videoDT + datetime.timedelta(seconds=clipStartTime)
             clipDate = clipStartDT.strftime('%Y%m%d')
             clipTime = clipStartDT.strftime('%H%M%S')
 
-            alterredFilename = preformattedFilename.replace('$[timestamp]', f'{clipDate}T{clipTime}Z')
+            alteredFilename = preformattedFilename.replace('$[timestamp]', f'{clipDate}T{clipTime}Z')
+            ext = 'mov' if output_format == 'native' else 'mp4'
+            output_path = f"{clipsdir}/{alteredFilename}_HL.{ext}"
 
-            if output_format == 'native':
-                # Keep original ProRes MOV format and quality
-                output_path = f"{clipsdir}/{alterredFilename}_HL.mov"
-                clip.write_videofile(
-                    output_path,
-                    codec="prores",
-                    audio_codec="pcm_s16le",  # Uncompressed audio
-                    preset="medium",
-                    threads=4,
-                    verbose=False,
-                    logger=None,
-                    ffmpeg_params=["-profile:v", "3"]  # ProRes 422 HQ profile
-                )
-            else:
-                # H.264 MP4 (smaller, faster encoding)
-                output_path = f"{clipsdir}/{alterredFilename}_HL.mp4"
-                clip.write_videofile(
-                    output_path,
-                    temp_audiofile="./temp-audio.m4a",
-                    remove_temp=True,
-                    audio_codec="aac",
-                    codec="libx264",
-                    preset="fast",
-                    threads=4,
-                    verbose=False,
-                    logger=None
-                )
+            clip_records.append({
+                'source': os.path.basename(path),
+                'start_sec': clipStartTime,
+                'end_sec': clipEndTime,
+                'duration_sec': duration,
+                'output': output_path,
+            })
 
-        self.closeClip(fullvideo)
+            if not dry_run:
+                fullvideo = VideoFileClip(path)
+                clip = fullvideo.subclip(clipStartTime, clipEndTime)
+                if output_format == 'native':
+                    clip.write_videofile(
+                        output_path,
+                        codec="prores",
+                        audio_codec="pcm_s16le",
+                        preset="medium",
+                        threads=4,
+                        verbose=False,
+                        logger=None,
+                        ffmpeg_params=["-profile:v", "3"]
+                    )
+                else:
+                    clip.write_videofile(
+                        output_path,
+                        temp_audiofile="./temp-audio.m4a",
+                        remove_temp=True,
+                        audio_codec="aac",
+                        codec="libx264",
+                        preset="fast",
+                        threads=4,
+                        verbose=False,
+                        logger=None
+                    )
+                self.closeClip(fullvideo)
 
-    def startRovia(self, folder, model_path, verbose, output_format='mp4'):
+        return clip_records
+
+    def startRovia(self, folder, model_path, verbose, output_format='mp4', dry_run=False):
         """Optimized: Load model once and reuse across all videos with persistent pool"""
         dependencies = {
             'f1_m': self.f1_m,
@@ -350,7 +357,12 @@ class rovia():
 
         total_videos = len(video_files)
         print(f'Found {total_videos} video(s) to process')
-        print(f'Output format: {output_format.upper()} ({"ProRes MOV" if output_format == "native" else "H.264 MP4"})')
+        if dry_run:
+            print('Mode: DRY RUN (analysis only, no video files will be written)')
+        else:
+            print(f'Output format: {output_format.upper()} ({"ProRes MOV" if output_format == "native" else "H.264 MP4"})')
+
+        all_clip_records = []
 
         # Create persistent process pool for all videos
         with Pool(processes=NUM_PROCESSES) as process_pool:
@@ -364,9 +376,16 @@ class rovia():
                 prediction = self.analyzeVideo(videofilepath, model, verbose, process_pool)
 
                 if verbose == 1:
-                    print('Generating clips ...')
+                    print('Generating clips ...' if not dry_run else 'Calculating clip timecodes ...')
 
-                self.generateClips(annotations=prediction, path=videofilepath, fps=30, output_format=output_format)
+                records = self.generateClips(
+                    annotations=prediction,
+                    path=videofilepath,
+                    fps=30,
+                    output_format=output_format,
+                    dry_run=dry_run
+                )
+                all_clip_records.extend(records)
                 end = time.time()
 
                 print(f'Time taken: {end-start:.2f} seconds')
@@ -374,7 +393,25 @@ class rovia():
                 if verbose == 1:
                     print('Done')
 
-        print('~~Highlight generation complete~~')
+        if dry_run:
+            report_path = os.path.join('./Rovia_Clips/', 'rovia_highlights_report.txt')
+            os.makedirs('./Rovia_Clips/', exist_ok=True)
+            with open(report_path, 'w') as f:
+                f.write('ROVIA Highlight Report (Dry Run)\n')
+                f.write(f'Generated: {datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}\n')
+                f.write(f'Videos processed: {total_videos}\n')
+                f.write(f'Total highlights found: {len(all_clip_records)}\n')
+                f.write('=' * 60 + '\n\n')
+                for r in all_clip_records:
+                    f.write(f'Source:    {r["source"]}\n')
+                    f.write(f'Start:     {r["start_sec"]}s\n')
+                    f.write(f'End:       {r["end_sec"]}s\n')
+                    f.write(f'Duration:  {r["duration_sec"]}s\n')
+                    f.write(f'Would save: {r["output"]}\n')
+                    f.write('-' * 40 + '\n')
+            print(f'\nDry run complete. Report written to: {report_path}')
+        else:
+            print('~~Highlight generation complete~~')
 
 
 if __name__ == '__main__':
@@ -389,6 +426,10 @@ if __name__ == '__main__':
                         choices=['mp4', 'native'],
                         default='mp4',
                         help='Optional: Output format - "mp4" (H.264, smaller files, faster) or "native" (ProRes MOV, original quality)')
+    parser.add_argument('-d', '--dry-run',
+                        action='store_true',
+                        default=False,
+                        help='Optional: Analyse videos and write a text report of highlights without encoding any video files')
     args = parser.parse_args()
 
     if args.folder == None:
@@ -410,4 +451,4 @@ if __name__ == '__main__':
     print('='*60)
 
     r = rovia()
-    r.startRovia(folder=args.folder, model_path=model, verbose=verbose, output_format=args.output)
+    r.startRovia(folder=args.folder, model_path=model, verbose=verbose, output_format=args.output, dry_run=args.dry_run)
