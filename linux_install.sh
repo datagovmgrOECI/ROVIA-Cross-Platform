@@ -81,10 +81,12 @@ pip install numpy==1.26.4 --force-reinstall
 
 echo ""
 echo "Step 9: Installing FFmpeg (required to run generated rovia_cut_clips.sh scripts)..."
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
 if command -v apt-get &> /dev/null; then
-    sudo apt-get install -y ffmpeg
+    $SUDO apt-get install -y ffmpeg
 elif command -v dnf &> /dev/null; then
-    sudo dnf install -y ffmpeg
+    $SUDO dnf install -y ffmpeg
 else
     echo "NOTE: Could not auto-install FFmpeg. Install it manually before running rovia_cut_clips.sh."
 fi
