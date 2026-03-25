@@ -1,0 +1,23 @@
+# Large model file - mount at runtime with -v flag, don't bake into image
+grama.hdf5
+
+# Output clips
+Rovia_Clips/
+
+# Backup copies
+forked/
+
+# Git metadata
+.git/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Temp files
+temp-audio.m4a
+*.tmp
+
+# Windows-only files (not needed in Linux container)
+windows_install.bat

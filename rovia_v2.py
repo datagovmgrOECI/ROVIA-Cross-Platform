@@ -232,20 +232,27 @@ class rovia():
         return results
 
     def interpretInputMetadata(self, videoFileName):
-        # Verifies the filename contains a timestamp (yyyymmddThhmmssZ ex.20181214T1401Z)
-        pattern = r'\d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|3[0-1])T([0-1]\d|2[0-3])[0-5]\d[0-5]\dZ'
+        # Try YYYYMMDDTHHmmssZ format (e.g. 20230415T152320Z)
+        pattern_iso = r'\d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|3[0-1])T([0-1]\d|2[0-3])[0-5]\d[0-5]\dZ'
+        # Try YYYYMMDD_HHmmss format (e.g. 20250510_192524)
+        pattern_underscore = r'\d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|3[0-1])_([0-1]\d|2[0-3])[0-5]\d[0-5]\d'
 
-        timestamp = search(pattern, videoFileName)
-
+        timestamp = search(pattern_iso, videoFileName)
         if timestamp:
             timestamp = timestamp.group()
+            timestampDT = datetime.datetime.strptime(timestamp, '%Y%m%dT%H%M%SZ')
+            preformattedFilename = videoFileName.replace(timestamp, '$[timestamp]')
         else:
-            raise Exception('Invalid filename. Timestamp not found.')
-
-        preformattedFilename = videoFileName.replace(timestamp, '$[timestamp]')
-
-        # returns a datetime object
-        timestampDT = datetime.datetime.strptime(timestamp, '%Y%m%dT%H%M%SZ')
+            timestamp = search(pattern_underscore, videoFileName)
+            if timestamp:
+                timestamp = timestamp.group()
+                timestampDT = datetime.datetime.strptime(timestamp, '%Y%m%d_%H%M%S')
+                preformattedFilename = videoFileName.replace(timestamp, '$[timestamp]')
+            else:
+                # No timestamp found - use epoch and keep original filename
+                print(f'Warning: No timestamp found in "{videoFileName}", using original filename for output.')
+                timestampDT = datetime.datetime.utcfromtimestamp(0)
+                preformattedFilename = videoFileName + '_$[timestamp]'
 
         return timestampDT, preformattedFilename
 
