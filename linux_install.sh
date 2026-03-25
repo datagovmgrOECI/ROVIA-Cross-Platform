@@ -80,7 +80,17 @@ echo "Step 8: Re-pinning numpy 1.26.4 (TF may have upgraded it)..."
 pip install numpy==1.26.4 --force-reinstall
 
 echo ""
-echo "Step 9: Verifying installation..."
+echo "Step 9: Installing FFmpeg (required to run generated rovia_cut_clips.sh scripts)..."
+if command -v apt-get &> /dev/null; then
+    sudo apt-get install -y ffmpeg
+elif command -v dnf &> /dev/null; then
+    sudo dnf install -y ffmpeg
+else
+    echo "NOTE: Could not auto-install FFmpeg. Install it manually before running rovia_cut_clips.sh."
+fi
+
+echo ""
+echo "Step 10: Verifying installation..."
 python -c "
 import tensorflow as tf
 import cv2

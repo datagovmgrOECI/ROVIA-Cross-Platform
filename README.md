@@ -4,7 +4,7 @@
 
 ROVIA uses deep neural networks to automatically generate highlights from deep-sea ROV video footage. It is a field-deployable, portable tool designed for ocean exploration.
 
-This fork adds **Windows 64-bit support**, a **Linux installer**, and a **dry-run mode** for previewing highlights before encoding.
+This fork adds **Windows 64-bit support**, a **Linux installer**, a **Mac installer**, and a **dry-run mode** for previewing highlights before encoding.
 
 > Original project: [oeci/ROVIA](https://github.com/oeci/ROVIA)
 > Supported by NOAA Ocean Exploration Cooperative Institute (OECI)
@@ -34,6 +34,27 @@ See [linux_install.md](linux_install.md) for full instructions, or run the autom
 bash linux_install.sh          # CPU only
 bash linux_install.sh --gpu    # With NVIDIA GPU support
 ```
+
+### Mac
+See [mac_install.md](mac_install.md) for full instructions, or run the automated installer:
+```bash
+bash mac_install.sh            # Intel Mac (CPU)
+bash mac_install.sh            # Apple Silicon — auto-detected, uses Metal GPU
+```
+
+---
+
+## FFmpeg
+
+**Running ROVIA** does not require a system FFmpeg install — moviepy bundles its own FFmpeg binary.
+
+**Running the generated cut scripts** (`rovia_cut_clips.sh` / `rovia_cut_clips.bat`) requires system FFmpeg:
+
+| Platform | Install command |
+|----------|----------------|
+| Windows | `winget install ffmpeg` |
+| Linux | `sudo apt-get install ffmpeg` |
+| Mac | `brew install ffmpeg` |
 
 ---
 
